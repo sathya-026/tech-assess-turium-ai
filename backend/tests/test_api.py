@@ -18,10 +18,15 @@ doc = open('/mnt/project/RAG_Foundations.md', 'rb').read()
 with TestClient(app) as c:
     print("health:", {k: v for k, v in c.get("/health").json().items() if k != "status"})
 
+    # Includes a deliberately short note (25 chars) — the min_chunk_chars
+    # fragment filter must not reject an entire short document — and an invalid
+    # URL, which must be rejected synchronously without creating an item.
     r = c.post("/ingest",
-        data={"text": "Our refund window is 30 days from purchase. Contact billing@acme.io."},
+        data={"text": "Refund window is 30 days.", "urls": ["ftp://bad.example/x"]},
         files=[("files", ("rag_notes.md", doc, "text/markdown"))])
     print("\n/ingest ->", r.status_code, "| skipped:", r.json()["skipped"])
+    assert len(r.json()["skipped"]) == 1, "bad-scheme URL should be skipped"
+    assert len(r.json()["items"]) == 2, "bad URL must not create an item"
 
     for _ in range(60):
         items = c.get("/items").json()
@@ -32,6 +37,8 @@ with TestClient(app) as c:
         assert i["status"] == "indexed", i["error"]
     print("   indexed_chunks:", items["indexed_chunks"])
     assert c.get("/items?status=indexed").json()["total"] == 2, "status filter broken"
+    short = [i for i in items["items"] if i["source_type"] == "text"][0]
+    assert short["chunk_count"] == 1, "short pasted note must still produce a chunk"
 
     print("\n-- stateless query --")
     d = c.post("/query", json={"question": "how does HyDE work", "top_k": 3}).json()

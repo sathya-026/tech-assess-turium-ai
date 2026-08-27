@@ -26,6 +26,14 @@ class MessageRole(StrEnum):
     ASSISTANT = "assistant"
 
 
+class ItemSourceType(StrEnum):
+    """How an item entered the system. Drives which metadata columns are set."""
+
+    TEXT = "text"    # pasted note; filename/mime_type/source_url are null
+    FILE = "file"    # uploaded file; filename + mime_type set
+    URL = "url"      # fetched page; source_url set, mime_type from the response
+
+
 class ItemStatus(StrEnum):
     PENDING = "pending"
     INDEXING = "indexing"

@@ -29,7 +29,8 @@ app/
   memory.py                     ConversationMemory, load_memory
   common/
     constants.py                StrEnums: providers, roles, statuses
-    file_helper.py              bytes -> text (the only format-aware code)
+    file_helper.py              upload bytes -> text (format-aware)
+    url_fetcher.py              URL validation + server-side fetch + HTML -> markdown
   ai/
     inference/
       types.py                  MemoryMessage, ContentDelta, UsageEvent, AIEvent
@@ -46,7 +47,7 @@ app/
     chunker.py                  offset-preserving structural chunking
     embedder.py                 thin facade over the embeddings provider
     store.py                    in-memory numpy matrix + BM25
-    indexer.py                  staged pipeline, BackgroundTask
+    indexer.py                  staged pipeline (fetch -> chunk -> embed), BackgroundTask
     retriever.py                dense + BM25 -> RRF -> format_context_for_prompt
   routers/
     ingest.py  items.py  query.py
@@ -86,10 +87,17 @@ contains a tool call. This service uses Chat Completions throughout.
 
 ## Endpoints
 
-**`POST /ingest`** — multipart, `text` and/or `files[]`, optional `title`.
-Returns `202`; items start `pending`, background pipeline moves them
-`indexing → indexed | failed`. Unusable files land in `skipped[]` rather than
-failing the request.
+**`POST /ingest`** — multipart, any combination of `text`, `files[]`, `urls[]`,
+plus optional `title`. Returns `202`; items start `pending` and the background
+pipeline moves them `indexing → indexed | failed`. Unusable inputs land in
+`skipped[]` rather than failing the request.
+
+URL items are fetched server-side *inside the pipeline*, not during the request,
+so a slow site cannot hold the connection open. URL syntax is still validated
+synchronously, so a bad scheme is rejected immediately without creating an item.
+HTML is extracted to markdown via trafilatura, which strips navigation and
+footer boilerplate — that boilerplate is near-identical across every page of a
+site, so indexing it produces chunks that crowd real content out of `top_k`.
 
 **`GET /items`** — list view, poll for status. Plus `GET /items/{id}` (includes
 `raw_text`) and `DELETE /items/{id}`.

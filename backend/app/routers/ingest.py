@@ -1,10 +1,15 @@
 """
-POST /ingest — raw text and/or file uploads.
+POST /ingest — pasted text, uploaded files, and/or URLs.
 
-Both in one multipart request because the frontend has one textarea and one
-drop zone feeding the same list. Validation is synchronous so bad input fails
-with a clear per-file reason; chunking and embedding are backgrounded so a large
-upload doesn't hold the connection.
+All three in one multipart request because the frontend has one textarea, one
+drop zone, and one URL box feeding the same list.
+
+Validation is synchronous, so bad input fails immediately with a per-input
+reason. Work is backgrounded:
+  - file bytes are extracted here (an unsupported format must be rejected now,
+    not minutes later)
+  - URL content is fetched in the pipeline (a hanging site must not hold this
+    connection open)
 """
 
 from __future__ import annotations
@@ -16,8 +21,9 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.constants import ItemStatus
+from app.common.constants import ItemSourceType, ItemStatus
 from app.common.file_helper import extract_text
+from app.common.url_fetcher import validate_url
 from app.config import settings
 from app.database import Item, get_db
 from app.db.items import create_items
@@ -33,10 +39,11 @@ async def ingest(
     db: AsyncSession = Depends(get_db),
     text: str | None = Form(None),
     title: str | None = Form(None),
+    urls: list[str] = Form(default=[]),
     files: list[UploadFile] = File(default=[]),
 ) -> IngestResponse:
-    if not text and not files:
-        raise HTTPException(400, "Provide `text`, one or more `files`, or both.")
+    if not text and not files and not urls:
+        raise HTTPException(400, "Provide `text`, `urls`, and/or `files`.")
 
     pending: list[Item] = []
     skipped: list[str] = []
@@ -45,7 +52,7 @@ async def ingest(
         pending.append(Item(
             id=str(uuid.uuid4()),
             title=title or (text.strip()[:60] + ("…" if len(text) > 60 else "")),
-            source_type="text",
+            source_type=ItemSourceType.TEXT,
             raw_text=text,
             char_count=len(text),
             status=ItemStatus.PENDING,
@@ -70,11 +77,33 @@ async def ingest(
         pending.append(Item(
             id=str(uuid.uuid4()),
             title=title or name,
-            source_type="file",
+            source_type=ItemSourceType.FILE,
             filename=name,
             mime_type=upload.content_type,
             raw_text=extracted,
             char_count=len(extracted),
+            status=ItemStatus.PENDING,
+        ))
+
+    for raw_url in urls:
+        if not raw_url or not raw_url.strip():
+            continue
+        try:
+            clean_url = validate_url(raw_url)
+        except ValueError as exc:
+            skipped.append(f"{raw_url.strip()[:80]}: {exc}")
+            continue
+
+        # raw_text stays empty and char_count 0 until the pipeline fetches the
+        # page. The title falls back to the URL and is replaced with the page's
+        # own <title> once known, unless the caller supplied one.
+        pending.append(Item(
+            id=str(uuid.uuid4()),
+            title=title or clean_url,
+            source_type=ItemSourceType.URL,
+            source_url=clean_url,
+            raw_text="",
+            char_count=0,
             status=ItemStatus.PENDING,
         ))
 
