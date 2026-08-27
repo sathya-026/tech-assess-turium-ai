@@ -11,7 +11,7 @@ function SourceCard({ source, onOpen }: { source: Source; onOpen: () => void }) 
     <li className={faded ? "opacity-60" : undefined}>
       <button
         onClick={onOpen}
-        className="group block w-full rounded-sm border border-rule bg-card p-3 text-left transition-colors hover:border-ink/35"
+        className="group block w-full rounded-sm border border-rule bg-card p-3 text-left transition-colors hover:border-ink/35 cursor-pointer"
       >
         <div className="flex items-baseline gap-2">
           <span className="passage-mark rounded-[2px] px-1 font-mono text-[10px] font-medium">

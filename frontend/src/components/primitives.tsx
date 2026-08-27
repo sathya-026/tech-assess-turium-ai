@@ -62,11 +62,24 @@ export function formatBytes(chars: number) {
 }
 
 export function formatWhen(iso: string) {
-  const then = new Date(iso).getTime();
-  const mins = Math.round((Date.now() - then) / 60_000);
-  if (Number.isNaN(mins)) return "";
+  const date = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  const diffMs = Date.now() - date.getTime();
+
+  if (diffMs < 0) return "just now";
+
+  const mins = Math.floor(diffMs / 60_000);
+
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }

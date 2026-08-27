@@ -1,4 +1,3 @@
-// Adapted from the widget's useChat. Same external shape — messages,
 // isLoading, error, send, cancel — but POST /query blocks until the full
 // answer is ready, so there's no SSE reader and no token-by-token append.
 // The assistant message arrives complete, with its sources attached.

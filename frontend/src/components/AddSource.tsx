@@ -74,7 +74,7 @@ export function AddSource() {
               aria-pressed={panel === p.id}
               className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
                 panel === p.id ? "bg-ink text-paper" : "text-slate hover:text-ink"
-              }`}
+              } cursor-pointer`}
             >
               {p.label}
             </button>

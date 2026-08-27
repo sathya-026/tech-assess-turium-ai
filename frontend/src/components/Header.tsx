@@ -47,7 +47,7 @@ export function Header({ onToggleLibrary }: { onToggleLibrary: () => void }) {
 
         <button
           onClick={onToggleLibrary}
-          className="rounded-sm border border-rule px-2.5 py-1 text-[11px] font-medium lg:hidden"
+          className="rounded-sm border border-rule px-2.5 py-1 text-[11px] font-medium lg:hidden cursor-pointer"
         >
           Library
         </button>

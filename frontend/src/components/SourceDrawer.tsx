@@ -88,7 +88,7 @@ export function SourceDrawer({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="shrink-0 px-1 text-[20px] leading-none text-slate hover:text-ink"
+              className="shrink-0 px-1 text-[20px] leading-none text-slate hover:text-ink cursor-pointer"
             >
               ×
             </button>
