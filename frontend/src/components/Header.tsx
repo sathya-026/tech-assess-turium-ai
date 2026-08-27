@@ -21,9 +21,9 @@ export function Header({ onToggleLibrary }: { onToggleLibrary: () => void }) {
   return (
     <header className="flex items-center justify-between border-b border-rule px-5 py-3 lg:px-6">
       <div className="flex items-baseline gap-3">
-        <h1 className="text-[15px] font-semibold tracking-[-0.02em]">Grounded</h1>
+        <h1 className="text-[15px] font-semibold tracking-[-0.02em]">AYS</h1>
         <span className="hidden font-mono text-[10px] text-slate sm:inline">
-          ask your sources, see the receipts
+          Ask Your Sources, see the receipts
         </span>
       </div>
 
