@@ -16,6 +16,5 @@ tenacity>=9.0                    # embedding retry policy
 numpy>=1.26
 rank-bm25>=0.2.2                 # BM25 half of hybrid retrieval
 
-# Optional, per document type (app/common/file_helper.py)
-# pymupdf4llm                    # PDF -> markdown, preserves headers
-# mammoth                        # DOCX -> markdown
+pymupdf4llm                    # PDF -> markdown, preserves headers
+mammoth                        # DOCX -> markdown
