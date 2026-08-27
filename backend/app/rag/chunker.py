@@ -134,4 +134,19 @@ def chunk_text(text: str) -> list[ChunkRecord]:
 
     for position, record in enumerate(records):
         record.position = position
+
+    # The min_chunk_chars filter exists to drop stray fragments from *inside* a
+    # document, not to reject a document for being short. A pasted one-line note
+    # is a legitimate item, so if filtering removed everything, keep the whole
+    # text as a single chunk.
+    if not records and text.strip():
+        lead = len(text) - len(text.lstrip())
+        records = [ChunkRecord(
+            text=text.strip(),
+            section_path="",
+            char_start=lead,
+            char_end=lead + len(text.strip()),
+            position=0,
+        )]
+
     return records
