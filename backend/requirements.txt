@@ -1,0 +1,21 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.9          # multipart/form-data for /ingest
+pydantic-settings>=2.6
+
+sqlalchemy[asyncio]>=2.0
+aiosqlite>=0.20
+
+httpx>=0.27                      # server-side URL fetching
+trafilatura>=2.0                 # HTML -> markdown main-content extraction
+                                 # (a stdlib fallback exists, but it keeps nav
+                                 #  and footer boilerplate, which pollutes the index)
+
+openai>=1.54
+tenacity>=9.0                    # embedding retry policy
+numpy>=1.26
+rank-bm25>=0.2.2                 # BM25 half of hybrid retrieval
+
+# Optional, per document type (app/common/file_helper.py)
+# pymupdf4llm                    # PDF -> markdown, preserves headers
+# mammoth                        # DOCX -> markdown
