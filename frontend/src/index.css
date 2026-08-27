@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/* The premise of this interface is that every claim has an address: the API
+   guarantees raw_text.slice(char_start, char_end) === snippet. So chrome is set
+   in a grotesk and stays quiet, anything the model or a document actually said
+   is set in a reading serif, and coordinates are set in mono. The one loud
+   colour is a highlighter mark, spent only on citations and the passage they
+   point at. */
+
+@theme {
+  --color-paper: #ecede7;
+  --color-card: #f7f8f4;
+  --color-ink: #1a1c19;
+  --color-slate: #6a7067;
+  --color-rule: #d5d8cf;
+  --color-mark: #d7ee5c;
+  --color-mark-deep: #a8bd2c;
+  --color-flag: #a8432c;
+
+  --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Newsreader", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--color-paper);
+  }
+  body {
+    margin: 0;
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-mark-deep);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-slate);
+  }
+  .rule-t {
+    border-top: 1px solid var(--color-rule);
+  }
+  .scroll-quiet {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-rule) transparent;
+  }
+}
+
+@keyframes mark-in {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
+/* The highlight is drawn as a swept ink stroke rather than a filled rect —
+   it should read as something laid over the page, not as a selected row. */
+.passage-mark {
+  background-image: linear-gradient(var(--color-mark), var(--color-mark));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0.08em 0.05em;
+  animation: mark-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .passage-mark {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
