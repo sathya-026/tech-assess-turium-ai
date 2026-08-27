@@ -1,11 +1,12 @@
-````markdown
 ## First-time setup
 
 Make sure you have:
 
+```
 - Python 3.11+
 - Node.js
 - npm
+```
 
 ### 1. Create the Python virtual environment
 
@@ -16,7 +17,7 @@ cd backend
 python3.11 -m venv .venv
 
 Replace 3.11 with your desired Python version, e.g. python3.12 -m venv .venv.
-````
+```
 
 ### 2. Activate the virtual environment
 
@@ -88,6 +89,3 @@ cd ..
 ```
 
 For backend environment variables and frontend-specific configuration, see the existing READMEs inside `backend/` and `frontend/`.
-
-```
-```
