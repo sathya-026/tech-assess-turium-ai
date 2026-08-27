@@ -32,29 +32,27 @@ export function deleteItem(itemId: string): Promise<void> {
 }
 
 /**
- * Pasted text and dropped files go up in one multipart request — 'text' once,
- * 'files' repeated per file. Either may be omitted, but not both.
+ * Pasted text, dropped files and URLs all go up in one multipart request —
+ * 'text' once, 'files' repeated per file, 'urls' repeated per URL. Any may be
+ * omitted, but not all three.
+ *
+ * URL syntax is validated synchronously; the fetch itself happens in the
+ * background, so a slow page never holds this request open.
  */
 export function ingest(
-  input: { text?: string; title?: string; files?: File[] },
+  input: { text?: string; title?: string; files?: File[]; urls?: string[] },
   signal?: AbortSignal,
 ): Promise<IngestResponse> {
   const form = new FormData();
   if (input.text?.trim()) form.append("text", input.text.trim());
   if (input.title?.trim()) form.append("title", input.title.trim());
   for (const file of input.files ?? []) form.append("files", file);
+  for (const url of input.urls ?? []) {
+    const trimmed = url.trim();
+    if (trimmed) form.append("urls", trimmed);
+  }
 
   return request<IngestResponse>("/ingest", { method: "POST", body: form, signal });
-}
-
-/** One URL per request. The server fetches and extracts the page. */
-export function ingestUrl(
-  input: { url: string; title?: string },
-  signal?: AbortSignal,
-): Promise<IngestResponse> {
-  const body: Record<string, string> = { url: input.url.trim() };
-  if (input.title?.trim()) body.title = input.title.trim();
-  return request<IngestResponse>("/ingest/url", { ...json(body), signal });
 }
 
 // ─── Query ──────────────────────────────────────────────────────────────────

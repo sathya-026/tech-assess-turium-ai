@@ -11,15 +11,17 @@ export interface ItemOut {
   id: string;
   title: string;
   source_type: ItemSourceType;
+  /** Set for 'file' items only. */
   filename: string | null;
+  /** Set for 'file' items, and for 'url' items once the fetch completes. */
   mime_type: string | null;
+  /** Set for 'url' items only. This is the URL *after* redirects. */
+  source_url: string | null;
   status: ItemStatus;
   error: string | null;
   char_count: number;
   chunk_count: number;
   created_at: string;
-  /** Present on items ingested via POST /ingest/url. */
-  source_url?: string | null;
 }
 
 export interface ItemDetail extends ItemOut {
