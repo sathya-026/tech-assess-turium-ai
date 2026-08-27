@@ -3,28 +3,23 @@ app/ai/embeddings/base.py
 
 Abstract base class every embedding provider must implement.
 
-This is a SEPARATE abstraction from app.ai.base.AIProvider, deliberately.
-Chat providers are selected per-agent, per-turn, driven by chat config
-(agents.llm_provider / llm_model). Embedding providers are selected by a
-completely different axis depending on the caller:
+This is a SEPARATE abstraction from app.ai.inference.base.InferenceProvider,
+deliberately. The two are selected on different axes:
 
-  - Semantic router (app/routing/embedder.py): no persistence constraint.
-    Swapping models just invalidates a Redis cache via CACHE_VERSION.
-    Safe to change freely.
+  - Inference provider is a free choice. Swapping it changes response style and
+    cost; nothing persisted depends on it.
 
-  - RAG indexing/retrieval (app/rag/embedder.py): embeddings are PERSISTED
-    in document_chunks.embedding (vector(1536) today). The provider/model
-    used at index time MUST match the provider/model used at query time —
-    cosine distance between two different embedding spaces is meaningless,
-    not just lower-quality. Changing this for an agent requires a re-index,
-    not just a config flip. That migration story is out of scope here;
-    this interface only makes the provider swappable, it doesn't yet make
-    the swap safe to do live.
+  - Embedding provider is persistence-constrained. Vectors live in
+    chunks.embedding, and cosine distance between two different embedding
+    spaces is meaningless — not merely lower quality. Changing the embedding
+    model requires a re-index (see rag.indexer.reindex_all), not a config flip.
 
-Not every provider necessarily implements both embed_query and embed_chunks
-meaningfully fast/cheap — but both are part of the contract since every
-embedding model can technically do both (it's the same API call shape,
-just batched vs single).
+Conflating them would force every future inference provider to also implement
+embeddings, which is not true in general.
+
+Providers must L2-normalize their output so cosine similarity reduces to a dot
+product in the store. Normalizing here rather than at search time keeps the hot
+path a single matrix multiply.
 """
 
 from __future__ import annotations
@@ -36,34 +31,27 @@ class EmbeddingProvider(ABC):
 
     @abstractmethod
     async def embed_query(self, text: str) -> list[float]:
-        """
-        Embed a single piece of text — a user query or router input.
-
-        Used by:
-          - app/rag/retriever.py at RAG query time
-          - app/routing/embedder.py for semantic routing similarity checks
-        """
+        """Embed a single text. Used at retrieval time."""
 
     @abstractmethod
     async def embed_chunks(self, texts: list[str]) -> list[list[float]]:
         """
-        Batch-embed multiple texts in one call, preserving input order.
-
-        Used by:
-          - app/rag/indexer.py at document index time
-
-        Empty input should return [] without making a network call.
+        Batch-embed, preserving input order across batches.
+        Used at index time. Empty input returns [] without a network call.
         """
 
     @property
     @abstractmethod
     def dimensions(self) -> int:
         """
-        Output vector width for this provider/model combination.
+        Output vector width for this provider/model.
 
-        Needed wherever a caller must know vector width ahead of time —
-        e.g. validating against a pgvector column width, or namespacing a
-        cache key so embeddings from different models never collide.
-        Not enforced inside the provider itself; callers are responsible
-        for checking compatibility before persisting or comparing vectors.
+        Callers need this ahead of time — the store asserts every loaded vector
+        matches it, which is what turns "someone changed the model without
+        re-indexing" from silently degraded ranking into a loud startup error.
         """
+
+    @property
+    @abstractmethod
+    def model(self) -> str:
+        """Model identifier, recorded on each chunk so a stale-vector check is possible."""

@@ -1,50 +1,48 @@
 """
-app/ai/base.py
+app/ai/inference/base.py
 
-Abstract base class that every AI provider must implement.
-The planner imports only this interface and the factory — never a concrete provider.
+Abstract base class every inference provider must implement.
+Callers import only this interface and the factory — never a concrete provider.
 
 Contract
 --------
   format_messages()
-      Takes the neutral MemoryMessage list produced by memory.load_memory(),
-      the agent's system prompt string, and the formatted RAG context string.
-      Returns a provider-specific messages list ready to pass straight into
-      the SDK. This is called ONCE before the ReAct loop begins.
+      Takes the neutral MemoryMessage list from memory.load_memory(), the
+      system prompt, and the formatted RAG context string. Returns a
+      provider-specific messages list ready to pass into the SDK. Called ONCE
+      per request, before generation.
 
-      Responsibilities inside this method:
-        - Build the system message (persona + RAG context + guardrails)
+      Responsibilities:
+        - Build the system message (persona + RAG context + formatting + guardrails)
         - Convert each MemoryMessage into the provider's wire format
 
-  stream()
-      Accepts the already-formatted messages list (from format_messages),
-      Yields normalised AIEvents — ContentDelta | UsageEvent.
+  append_user_message()
+      Append the current user turn to the formatted list, in place.
 
-      Responsibilities inside this method:
-        - All provider-specific streaming logic
-        - Usage extraction and emission as UsageEvent
-        - The planner must never see raw SDK objects
+  stream()
+      Yields normalised AIEvents. All SDK-specific streaming logic, delta
+      handling, and usage extraction lives here. The caller never sees a raw
+      SDK object.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import date
 from typing import Any, AsyncGenerator
 
-from app.ai.types import AIEvent, MemoryMessage
+from app.ai.inference.types import AIEvent, ContentDelta, MemoryMessage, UsageEvent
 
 
-class AIProvider(ABC):
+class InferenceProvider(ABC):
 
-    FORMATTING_INSTRUCTIONS = """
-    ## Response Formatting
-    - Use markdown for all responses.
-    - Use bullet points (`-`) or numbered lists for any list of items or steps.
-    - Use `**bold**` for key terms or important values.
-    - Use a blank line between distinct points or paragraphs.
-    - Keep responses concise — avoid walls of text.
-    - Never wrap the entire response in a code block unless it literally is code.
-    """
+    FORMATTING_INSTRUCTIONS = """## Response Formatting
+- Use markdown for all responses.
+- Use bullet points (`-`) or numbered lists for any list of items or steps.
+- Use `**bold**` for key terms or important values.
+- Use a blank line between distinct points or paragraphs.
+- Keep responses concise — avoid walls of text.
+- Never wrap the entire response in a code block unless it literally is code."""
 
     # ------------------------------------------------------------------
     # Message transformation
@@ -60,54 +58,76 @@ class AIProvider(ABC):
         """
         Transform neutral memory + context into provider wire format.
 
-        Parameters
-        ----------
-        memory:
-            Ordered list of past turns from memory.load_memory().
-            Empty list on first message in a conversation.
-        system_prompt:
-            The agent's configured persona/instructions (agents.system_prompt).
-        rag_context:
-            Pre-formatted RAG string from retriever.format_context_for_prompt().
-            Empty string when retrieval returned no chunks (RAG miss).
-
-        Returns
-        -------
-        A list in whatever shape the provider's SDK expects for its
-        `messages` parameter. The planner treats this as opaque —
-        it only appends to it using append_user_message().
+        rag_context is "" on a retrieval miss — providers must omit the
+        knowledge-base section entirely rather than emitting an empty heading,
+        which reads to the model as "the knowledge base is empty".
         """
 
     @abstractmethod
-    def append_user_message(
-        self,
-        messages: list[Any],
-        content: str,
-    ) -> None:
-        """
-        Append a user turn to an already-formatted messages list in-place.
-        Called by the planner once, right before the ReAct loop starts.
-        """
+    def append_user_message(self, messages: list[Any], content: str) -> None:
+        """Append the current user turn in place."""
 
     # ------------------------------------------------------------------
-    # Streaming
+    # Generation
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def stream(
-        self,
-        messages: list[Any],
-    ) -> AsyncGenerator[AIEvent, None]:
+    def stream(self, messages: list[Any]) -> AsyncGenerator[AIEvent, None]:
         """
         Call the provider and yield normalised AIEvents.
 
-        The planner calls this at the start of each ReAct iteration,
-        passing the full messages list accumulated so far.
-
-        Yield order within one call:
-          - OR one or more ContentDelta    (final answer tokens)
-          - Exactly one UsageEvent         (always last)
-
-        The provider must never yield ContentDelta
-        in the same call — they represent mutually exclusive turn types.
+        Yield order:
+          - Zero or more ContentDelta (response tokens, in order)
+          - Exactly one UsageEvent    (always last)
         """
+
+    # ------------------------------------------------------------------
+    # Shared helpers — concrete, so providers don't each reinvent them
+    # ------------------------------------------------------------------
+
+    async def complete(self, messages: list[Any]) -> tuple[str, UsageEvent | None]:
+        """
+        Collect a full response by draining stream().
+
+        Provided here so the non-streaming path is defined once. The JSON
+        /query endpoint uses this; an SSE endpoint would consume stream()
+        directly. Providers should not override it.
+        """
+        parts: list[str] = []
+        usage: UsageEvent | None = None
+
+        async for event in self.stream(messages):
+            if isinstance(event, ContentDelta):
+                parts.append(event.content)
+            elif isinstance(event, UsageEvent):
+                usage = event
+
+        return "".join(parts), usage
+
+    def build_system_prompt(self, system_prompt: str, rag_context: str) -> str:
+        """
+        Compose the system message from four sections:
+          1. Persona / instructions
+          2. Knowledge base context (omitted on retrieval miss)
+          3. Formatting instructions
+          4. Behavioural guardrails
+        """
+        sections: list[str] = [system_prompt.strip()]
+        if rag_context:
+            sections.append(f"## Knowledge Base Context\n{rag_context}")
+        sections.append(self.FORMATTING_INSTRUCTIONS)
+        sections.append(self._guardrails())
+        return "\n\n".join(sections)
+
+    def _guardrails(self) -> str:
+        return (
+            "## Instructions\n"
+            f"Today's date is {date.today().isoformat()}.\n"
+            "Answer from the knowledge base context when it is relevant, and cite "
+            "the context numbers you used as [1], [2].\n"
+            "If the context does not contain the answer, say so clearly — do not "
+            "fabricate, and do not fall back on general knowledge.\n"
+            "If the question is too vague to answer from the context, say what is "
+            "ambiguous and ask one clarifying question.\n"
+            "Never cite a context number that was not provided."
+        )

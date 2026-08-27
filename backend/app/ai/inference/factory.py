@@ -1,53 +1,43 @@
 """
-app/ai/factory.py
+app/ai/inference/factory.py
 
-Single entry point for obtaining an AIProvider instance.
-The planner imports only this function — never a concrete provider class.
+Single entry point for obtaining an InferenceProvider.
+Callers import only this function — never a concrete provider class.
 
-Adding a new provider:
-  1. Implement AIProvider in app/ai/<provider_name>.py
-  2. Add its import and a branch in get_provider() below
-  3. No other file needs to change
+Adding a provider:
+  1. Implement InferenceProvider in app/ai/inference/providers/<name>.py
+  2. Add a branch below
+  3. No other file changes
 """
 
 from __future__ import annotations
 
-from app.ai.base import AIProvider
+from functools import lru_cache
+
+from app.ai.inference.base import InferenceProvider
 from app.common.constants import AIProviderType
 
 
-def get_provider(provider: str, model: str) -> AIProvider:
+@lru_cache
+def get_inference_provider(provider: str, model: str) -> InferenceProvider:
     """
-    Return the AIProvider implementation for the given provider string.
+    Return the InferenceProvider for the given provider string.
 
-    Parameters
-    ----------
-    provider:
-        The agents.llm_provider value — e.g. "openai", "anthropic".
-        Matched case-insensitively.
-    model:
-        The agents.llm_model value — passed through to the provider
-        so one implementation can serve multiple models (e.g. gpt-4o,
-        gpt-4o-mini) without separate classes.
-
-    Raises
-    ------
-    ValueError
-        If the provider string is not recognised. This surfaces as a 500
-        on the chat endpoint, which is appropriate — it indicates a
-        misconfigured agent record that should never reach production.
+    Cached per (provider, model) so the SDK client and its connection pool are
+    reused across requests instead of rebuilt per call. Providers must stay
+    stateless for this to be safe — all per-request state lives in the
+    `messages` list the caller owns.
     """
     match provider.lower():
         case AIProviderType.OPENAI:
-            from app.ai.providers.openai import OpenAIProvider
-            return OpenAIProvider(model=model)
+            from app.ai.inference.providers.openai import OpenAIInferenceProvider
+            return OpenAIInferenceProvider(model=model)
 
-        case AIProviderType.GEMINI:
-            from app.ai.providers.gemini import GeminiProvider
-            return GeminiProvider(model=model)
+        case AIProviderType.STUB:
+            from app.ai.inference.providers.stub import StubInferenceProvider
+            return StubInferenceProvider(model=model)
 
         case _:
             raise ValueError(
-                f"Unknown AI provider '{provider}'. "
-                f"Supported providers: openai, gemini"
+                f"Unknown inference provider '{provider}'. Supported: openai, stub"
             )

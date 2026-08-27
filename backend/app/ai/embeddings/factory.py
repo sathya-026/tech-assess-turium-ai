@@ -1,55 +1,38 @@
 """
 app/ai/embeddings/factory.py
 
-Single entry point for obtaining an EmbeddingProvider instance.
-Mirrors app/ai/factory.py's pattern exactly, but is intentionally a
-separate function — conflating chat-provider and embedding-provider
-selection would force every future chat provider to also implement
-embeddings, which isn't true (e.g. a provider might do chat only).
-
-Adding a new embedding provider:
-  1. Implement EmbeddingProvider in app/ai/embeddings/<provider_name>.py
-  2. Add its import and a branch in get_embedding_provider() below
-  3. No other file needs to change
+Single entry point for obtaining an EmbeddingProvider. Mirrors the inference
+factory's pattern but is intentionally a separate function — see
+app/ai/embeddings/base.py for why the two hierarchies are split.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from app.ai.embeddings.base import EmbeddingProvider
+from app.common.constants import EmbeddingProviderType
 
 
-def get_embedding_provider(provider: str) -> EmbeddingProvider:
+@lru_cache
+def get_embedding_provider(provider: str, model: str) -> EmbeddingProvider:
     """
-    Return the EmbeddingProvider implementation for the given provider string.
+    Return the EmbeddingProvider for the given provider/model.
 
-    Parameters
-    ----------
-    provider:
-        "openai" or "gemini". Matched case-insensitively.
-
-        Unlike get_provider() for chat, there's no per-agent model string
-        threaded through here yet — each provider currently hardcodes its
-        model (text-embedding-3-small for OpenAI, gemini-embedding-001 for
-        Gemini). If/when RAG embeddings become agent-configurable, this
-        signature will need a model parameter the same way chat's does —
-        deferred until that migration is actually being built.
-
-    Raises
-    ------
-    ValueError
-        If the provider string is not recognised.
+    Unlike the reference, model is threaded through rather than hardcoded in
+    each provider — the model string is persisted per chunk, so it has to come
+    from one place that config controls.
     """
     match provider.lower():
-        case "openai":
+        case EmbeddingProviderType.OPENAI:
             from app.ai.embeddings.providers.openai import OpenAIEmbeddingProvider
-            return OpenAIEmbeddingProvider()
+            return OpenAIEmbeddingProvider(model=model)
 
-        case "gemini":
-            from app.ai.embeddings.providers.gemini import GeminiEmbeddingProvider
-            return GeminiEmbeddingProvider()
+        case EmbeddingProviderType.STUB:
+            from app.ai.embeddings.providers.stub import StubEmbeddingProvider
+            return StubEmbeddingProvider(model=model)
 
         case _:
             raise ValueError(
-                f"Unknown embedding provider '{provider}'. "
-                f"Supported providers: openai, gemini"
+                f"Unknown embedding provider '{provider}'. Supported: openai, stub"
             )

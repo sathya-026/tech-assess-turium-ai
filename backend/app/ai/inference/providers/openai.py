@@ -1,41 +1,40 @@
 """
-app/ai/openai.py
+app/ai/inference/providers/openai.py
 
-OpenAI implementation of AIProvider.
+OpenAI implementation of InferenceProvider.
 
-Responsibilities absorbed from the old planner.py:
-  - Building the system prompt (persona + RAG context + guardrails)
-  - Converting MemoryMessages to OpenAI message dicts
-  - Streaming from the OpenAI SDK
-  - Extracting usage from the final chunk and emitting UsageEvent
+Uses Chat Completions throughout — format_messages and stream speak the same
+wire format. (The reference repo mixes Responses-API shapes in its append_*
+methods with Chat-Completions shapes in its memory conversion; with no tool
+calling here there is only one shape to get right, but the rule still holds:
+one API per provider class.)
 
-The planner never imports openai directly.
+`stream_options={"include_usage": True}` is required to get a usage payload on
+a streamed call — without it the final chunk carries usage=None and token
+accounting silently records zero.
 """
 
 from __future__ import annotations
 
-import json
-from datetime import date
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
-
-from app.ai.base import AIProvider
-from app.ai.types import (
-    AIEvent,
-    ContentDelta,
-    MemoryMessage,
-    UsageEvent,
-)
+from app.ai.inference.base import InferenceProvider
+from app.ai.inference.types import AIEvent, ContentDelta, MemoryMessage, UsageEvent
 from app.config import settings
 
 
-class OpenAIProvider(AIProvider):
+class OpenAIInferenceProvider(InferenceProvider):
 
     def __init__(self, model: str) -> None:
         self._model = model
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self._client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            max_retries=3,
+            timeout=90.0,
+        )
 
     # ------------------------------------------------------------------
     # Message transformation
@@ -48,30 +47,19 @@ class OpenAIProvider(AIProvider):
         rag_context: str,
     ) -> list[dict[str, Any]]:
         """
-        Build the full OpenAI messages list from neutral inputs.
-
         Layout:
-          [0]  system   — persona + RAG context + guardrails
-          [1…] history  — converted from MemoryMessage list                         
+          [0]   system  — persona + RAG context + formatting + guardrails
+          [1..] history — one entry per MemoryMessage, oldest first
         """
-        messages: list[dict[str, Any]] = []
-        messages.append(
-            {
-                "role": "system",
-                "content": self._build_system_prompt(system_prompt, rag_context),
-            }
-        )
-
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.build_system_prompt(system_prompt, rag_context)}
+        ]
         for mem in memory:
-            messages.extend(self._memory_message_to_openai(mem))
-
+            if mem.content:
+                messages.append({"role": mem.role, "content": mem.content})
         return messages
 
-    def append_user_message(
-        self,
-        messages: list[dict[str, Any]],
-        content: str,
-    ) -> None:
+    def append_user_message(self, messages: list[dict[str, Any]], content: str) -> None:
         messages.append({"role": "user", "content": content})
 
     # ------------------------------------------------------------------
@@ -79,70 +67,31 @@ class OpenAIProvider(AIProvider):
     # ------------------------------------------------------------------
 
     async def stream(
-        self,
-        messages: list[Any],
+        self, messages: list[dict[str, Any]]
     ) -> AsyncGenerator[AIEvent, None]:
-
-        call_kwargs: dict[str, Any] = {
-            "model": self._model,
-            "input": messages,
-            "stream": True,
-        }
-
-        response_stream = await self._client.responses.create(**call_kwargs)
-
-        async for event in response_stream:
-            event_type = event.type
-
-            # -- Text delta --
-            if event_type == "response.output_text.delta":
-                yield ContentDelta(content=event.delta)
-
-            # -- Usage + completion --
-            elif event_type == "response.completed":
-                if event.response.usage:
-                    u = event.response.usage
-                    yield UsageEvent(
-                        prompt_tokens=u.input_tokens,
-                        completion_tokens=u.output_tokens,
-                        total_tokens=u.total_tokens,
-                    )
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _build_system_prompt(self, system_prompt: str, rag_context: str) -> str:
-        """
-        Compose the full system message from four sections:
-          1. Agent persona / instructions
-          2. RAG knowledge base context (omitted on RAG miss)
-          3. Formatting instructions
-          4. Behavioural guardrails
-        """
-        sections: list[str] = [system_prompt.strip()]
-        if rag_context:
-            sections.append(f"## Knowledge Base Context\n{rag_context}")
-        sections.append(self.FORMATTING_INSTRUCTIONS)
-        sections.append(self._guardrails())
-
-        return "\n\n".join(sections)
-
-    def _guardrails(self) -> str:
-        return (
-            "## Instructions\n"
-            f"Today's date is {date.today().isoformat()}.\n"
-            "Answer only from the knowledge base context when it is relevant. "
-            "If relevant information is present, provide a complete answer without citing the context. "
-            "If the context does not contain the answer, say so clearly — do not fabricate. "
-            "Be concise and helpful."
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            temperature=settings.temperature,
+            max_tokens=settings.max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
         )
 
-    def _memory_message_to_openai(self, mem: MemoryMessage) -> list[dict[str, Any]]:
-        if mem.role == "user":
-            return [{"role": "user", "content": mem.content}]
+        async for chunk in response:
+            # The usage-bearing final chunk has an empty choices list, so this
+            # ordering matters — indexing choices[0] first would raise.
+            if chunk.usage is not None:
+                yield UsageEvent(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens,
+                )
+                continue
 
-        if mem.role == "assistant":
-            return [{"role": "assistant", "content": mem.content}]
+            if not chunk.choices:
+                continue
 
-        return []
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield ContentDelta(content=delta.content)
